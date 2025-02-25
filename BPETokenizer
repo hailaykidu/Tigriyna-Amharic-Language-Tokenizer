@@ -1,0 +1,109 @@
+from collections import Counter, deque
+
+class BPETokenizer:
+    def __init__(self):
+        self.vocab = {}
+        self.inverse_vocab = {}
+        self.bpe_merges = {}
+
+    def train(self, text, vocab_size):
+        # Preprocess: Replace spaces with 'Ġ'
+        processed_text = []
+        for i, char in enumerate(text):
+            if char == " " and i != 0:
+                processed_text.append("Ġ")
+            if char != " ":
+                processed_text.append(char)
+        processed_text = "".join(processed_text)
+
+        # Initialize vocab with unique characters
+        unique_chars = list(set(processed_text))
+        self.vocab = {i: char for i, char in enumerate(unique_chars)}
+        self.inverse_vocab = {char: i for i, char in self.vocab.items()}
+
+        # Tokenize the processed_text into token IDs
+        token_ids = [self.inverse_vocab[char] for char in processed_text]
+
+        # BPE steps: Repeatedly find and replace frequent pairs
+        for new_id in range(len(self.vocab), vocab_size):
+            pair_id = self.find_freq_pair(token_ids)
+            if pair_id is None:  # No more pairs to merge. Stopping training.
+                break
+            token_ids = self.replace_pair(token_ids, pair_id, new_id)
+            self.bpe_merges[pair_id] = new_id
+
+        # Build the vocabulary with merged tokens
+        for (p0, p1), new_id in self.bpe_merges.items():
+            merged_token = self.vocab[p0] + self.vocab[p1]
+            self.vocab[new_id] = merged_token
+            self.inverse_vocab[merged_token] = new_id
+
+    def encode(self, text):
+        # Encode the input text into a list of token IDs
+        processed_text = []
+        for i, char in enumerate(text):
+            if char == " " and i != 0:
+                processed_text.append("Ġ")
+            if char != " ":
+                processed_text.append(char)
+        processed_text = "".join(processed_text)
+        token_ids = [self.inverse_vocab[char] for char in processed_text]
+        return token_ids
+
+    def decode(self, token_ids):
+        # Decode a list of token IDs back into a string
+        decoded_string = ""
+        for token_id in token_ids:
+            token = self.vocab[token_id]
+            if token.startswith("Ġ"):
+                decoded_string += " " + token[1:]
+            else:
+                decoded_string += token
+        return decoded_string
+
+    def find_freq_pair(self, token_ids):
+        pairs = Counter(zip(token_ids, token_ids[1:]))
+        if not pairs:
+            return None
+        return max(pairs.items(), key=lambda x: x[1])[0]
+
+    def replace_pair(self, token_ids, pair_id, new_id):
+        dq = deque(token_ids)
+        replaced = []
+        while dq:
+            current = dq.popleft()
+            if dq and (current, dq[0]) == pair_id:
+                replaced.append(new_id)
+                dq.popleft()
+            else:
+                replaced.append(current)
+        return replaced
+
+if __name__ == "__main__":
+    # Load the text from the file
+    with open('/home/teklehaymanot/Desktop/Resource Data/Amharic document.txt', 'r', encoding='utf-8') as file:
+        text = file.read()
+    
+    tokenizer = BPETokenizer()
+    
+    # Train the BPE tokenizer
+    vocab_size = 32000  # Desired vocabulary size
+    tokenizer.train(text, vocab_size)
+    
+    # Save the tokenizer and merges to files
+    with open('amharic_bpe_vocab.json', 'w', encoding='utf-8') as vocab_file:
+        json.dump(tokenizer.vocab, vocab_file, ensure_ascii=False, indent=4)
+    
+    with open('amharic_bpe_merges.json', 'w', encoding='utf-8') as merges_file:
+        json.dump({str(k): v for k, v in tokenizer.bpe_merges.items()}, merges_file, ensure_ascii=False, indent=4)
+    
+    # Example usage
+    amharic_text = "ዴስክ አይቲና ዲጂታል ትምህርት መሪ ሥራ አስፈፃሚ የስኩልኔት አይሲቲ ዴስክ ኃላፊ"
+    
+    # Encode the text
+    encoded_text = tokenizer.encode(amharic_text)
+    print("Encoded:", encoded_text)
+    
+    # Decode the text
+    decoded_text = tokenizer.decode(encoded_text)
+    print("Decoded:", decoded_text)
